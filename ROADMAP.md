@@ -31,22 +31,22 @@ Feature plan and task tracker for future development.
 
 - [x] **Clickable TOC links** — Internal PDF links that jump to the referenced page
 - [x] **Clickable URL links** — Source URLs in headers/TOC as clickable hyperlinks
-- [ ] **Cover page** — Customizable cover page with project name, logo, author, date
+- [x] **Cover page** — Customizable cover page with project name, logo, author, date
 - [ ] **Page orientation per capture** — Auto-landscape for wide captures, portrait for tall ones
 - [ ] **Custom header/footer templates** — User-defined text with variables (`{title}`, `{url}`, `{date}`, `{page}`)
-- [ ] **Watermark support** — Optional diagonal watermark text across pages (e.g., "DRAFT", "CONFIDENTIAL")
+- [x] **Watermark support** — Optional diagonal watermark text across pages (e.g., "DRAFT", "CONFIDENTIAL")
 - [ ] **PDF bookmarks** — Sidebar bookmark navigation for each capture section
 - [ ] **Page border/shadow** — Subtle border or drop shadow around captured images for visual polish
 - [ ] **Image fit options** — Fit-to-width, fit-to-page, or actual-size rendering modes
 - [ ] **Appendix page** — Auto-generated list of all source URLs at the end
-
+- [ ] output to other formats
 ---
 
 ## 🗂️ Project Management
 
 - [x] **Drag-and-drop reordering** — Drag pages to reorder instead of just up/down buttons
-- [ ] **Project export/import** — Export project as JSON file, import on another machine
-- [ ] **Project duplication** — Clone an existing project with all its pages
+- [x] **Project export/import** — Export project as JSON file, import on another machine
+- [x] **Project duplication** — Clone an existing project with all its pages
 - [ ] **Project tags/categories** — Tag projects for organization (e.g., "API Docs", "Tutorials")
 - [ ] **Bulk page selection** — Checkbox multi-select for bulk delete or bulk move
 - [x] **Page preview modal** — Click thumbnail to see full-size preview of captured page
@@ -91,8 +91,8 @@ Feature plan and task tracker for future development.
 - [ ] **Web Worker PDF compilation** — Move jsPDF processing to a Web Worker to prevent UI freeze
 - [ ] **Chunked image storage** — Split large images across multiple storage keys to avoid quota per-key limits
 - [ ] **Compression optimization** — Try WebP format where supported for smaller storage footprint
-- [ ] **Memory management** — Release canvas/image objects immediately after use during compilation
-- [ ] **Streaming PDF build** — Build PDF incrementally instead of holding all images in memory
+- [x] **Memory management** — Release canvas/image objects immediately after use during compilation
+- [x] **Streaming PDF build** — Build PDF incrementally instead of holding all images in memory
 
 ---
 
@@ -106,15 +106,15 @@ Feature plan and task tracker for future development.
 | ✅ Done | Page preview modal | Medium | High |
 | 🔴 High | IndexedDB storage | High | High |
 | 🟡 Medium | Region selection capture | High | Medium |
-| 🟡 Medium | Project export/import | Medium | Medium |
+| ✅ Done | Project export/import | Medium | Medium |
 | ✅ Done | Delayed capture timer | Low | Medium |
-| 🟡 Medium | Cover page | Medium | Medium |
+| ✅ Done | Cover page | Medium | Medium |
 | 🟡 Medium | Exclude elements | Medium | Medium |
 | 🟡 Medium | PDF bookmarks | Medium | Medium |
 | 🟢 Low | Cloud sync | High | Medium |
 | 🟢 Low | Batch URL capture | High | Medium |
 | 🟢 Low | OCR text extraction | High | Low |
-| 🟢 Low | Watermark support | Low | Low |
+| ✅ Done | Watermark support | Low | Low |
 | 🟢 Low | Light theme | Medium | Low |
 
 ---
@@ -150,3 +150,9 @@ Feature plan and task tracker for future development.
 - [x] Page preview modal (click thumbnail for full-size view)
 - [x] Delayed capture timer (None/3s/5s/10s countdown with visual overlay)
 - [x] Drag-and-drop page reordering (HTML5 DnD on grip handles)
+- [x] Project export/import (JSON file download/upload)
+- [x] Cover page (configurable with project name, author, date)
+- [x] Watermark support (diagonal text overlay with configurable opacity)
+- [x] Project duplication (clone active project with all pages)
+- [x] Memory management (release canvas/image objects after use in capture & compilation)
+- [x] Streaming PDF build (incremental processing with GC yields between pages/segments)

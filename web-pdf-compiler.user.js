@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web PDF Compiler
 // @namespace    http://tampermonkey.net/
-// @version      2.8.0
+// @version      3.4.0
 // @description  Scan webpages and compile multiple pages into a single PDF document with inter-page persistence
 // @author       You
 // @match        *://*/*
@@ -36,6 +36,9 @@
         includeHeaders: true,
         includePageNumbers: true,
         includeTOC: true,
+        includeCoverPage: false,
+        coverAuthor: '',
+        watermarkText: '',
         overlapPx: 30,
         pageBreakSeparator: true,
     };
@@ -77,7 +80,7 @@
             var img = new Image();
             img.onload = function () {
                 var w = img.width, h = img.height;
-                if (w <= maxWidth) { resolve(dataUrl); return; }
+                if (w <= maxWidth) { img.src = ''; resolve(dataUrl); return; }
                 var ratio = maxWidth / w;
                 w = maxWidth;
                 h = Math.round(h * ratio);
@@ -85,9 +88,13 @@
                 cvs.width = w; cvs.height = h;
                 var ctx = cvs.getContext('2d');
                 ctx.drawImage(img, 0, 0, w, h);
-                resolve(cvs.toDataURL('image/jpeg', quality));
+                var result = cvs.toDataURL('image/jpeg', quality);
+                // Release memory
+                cvs.width = 0; cvs.height = 0;
+                img.src = '';
+                resolve(result);
             };
-            img.onerror = function () { resolve(dataUrl); };
+            img.onerror = function () { img.src = ''; resolve(dataUrl); };
             img.src = dataUrl;
         });
     }
@@ -235,6 +242,7 @@
         '<div class="wpc-btn-row" style="margin-top:4px">' +
         '<button class="wpc-btn wpc-btn-secondary wpc-btn-sm" id="wpc-btn-export-project">' + ICONS.download + ' Export</button>' +
         '<button class="wpc-btn wpc-btn-secondary wpc-btn-sm" id="wpc-btn-import-project">' + ICONS.upload + ' Import</button>' +
+        '<button class="wpc-btn wpc-btn-secondary wpc-btn-sm" id="wpc-btn-clone-project">' + ICONS.plus + ' Clone</button>' +
         '</div>' +
         '<div class="wpc-section-title">Capture This Page</div>' +
         '<div class="wpc-capture-options">' +
@@ -438,7 +446,10 @@
             '<div class="wpc-chk"><input type="checkbox" id="wpc-s-includeTOC"' + (s.includeTOC ? ' checked' : '') + '><label for="wpc-s-includeTOC">Include Table of Contents</label></div>' +
             '<div class="wpc-chk"><input type="checkbox" id="wpc-s-includeHeaders"' + (s.includeHeaders ? ' checked' : '') + '><label for="wpc-s-includeHeaders">Page Headers (title + URL)</label></div>' +
             '<div class="wpc-chk"><input type="checkbox" id="wpc-s-includePageNumbers"' + (s.includePageNumbers ? ' checked' : '') + '><label for="wpc-s-includePageNumbers">Page Numbers (Page X of Y)</label></div>' +
-            '<div class="wpc-chk"><input type="checkbox" id="wpc-s-pageBreakSeparator"' + (s.pageBreakSeparator ? ' checked' : '') + '><label for="wpc-s-pageBreakSeparator">Section Divider Lines</label></div></div>';
+            '<div class="wpc-chk"><input type="checkbox" id="wpc-s-pageBreakSeparator"' + (s.pageBreakSeparator ? ' checked' : '') + '><label for="wpc-s-pageBreakSeparator">Section Divider Lines</label></div>' +
+            '<div class="wpc-chk"><input type="checkbox" id="wpc-s-includeCoverPage"' + (s.includeCoverPage ? ' checked' : '') + '><label for="wpc-s-includeCoverPage">Cover Page</label></div>' +
+            '<label>Cover Author Name</label><input type="text" id="wpc-s-coverAuthor" value="' + (s.coverAuthor || '') + '" placeholder="(optional)">' +
+            '<label>Watermark Text</label><input type="text" id="wpc-s-watermarkText" value="' + (s.watermarkText || '') + '" placeholder="e.g. DRAFT, CONFIDENTIAL (leave empty for none)"></div>';
 
         showModal({
             title: 'PDF Settings',
@@ -456,6 +467,9 @@
                     includeHeaders: modalEl.querySelector('#wpc-s-includeHeaders').checked,
                     includePageNumbers: modalEl.querySelector('#wpc-s-includePageNumbers').checked,
                     pageBreakSeparator: modalEl.querySelector('#wpc-s-pageBreakSeparator').checked,
+                    includeCoverPage: modalEl.querySelector('#wpc-s-includeCoverPage').checked,
+                    coverAuthor: modalEl.querySelector('#wpc-s-coverAuthor').value.trim(),
+                    watermarkText: modalEl.querySelector('#wpc-s-watermarkText').value.trim(),
                 });
                 toast('Settings saved');
             }
@@ -704,6 +718,23 @@
         document.body.removeChild(input);
     });
 
+    // Clone active project
+    panel.querySelector('#wpc-btn-clone-project').addEventListener('click', function () {
+        var projects = loadProjects(); var activeId = getActiveProjectId(); var project = projects[activeId];
+        if (!project) { toast('No project to clone'); return; }
+        var newId = uid();
+        var cloned = JSON.parse(JSON.stringify(project));
+        cloned.id = newId;
+        cloned.name = project.name + ' (copy)';
+        cloned.created = Date.now();
+        cloned.pages.forEach(function (p) { p.id = uid(); });
+        projects[newId] = cloned;
+        saveProjects(projects);
+        setActiveProjectId(newId);
+        refreshUI();
+        toast('Cloned "' + project.name + '" (' + cloned.pages.length + ' pages)');
+    });
+
     panel.querySelectorAll('.wpc-capture-opt').forEach(function (opt) {
         opt.addEventListener('click', function () {
             panel.querySelectorAll('.wpc-capture-opt').forEach(function (o) { o.classList.remove('active'); });
@@ -783,12 +814,17 @@
             thumbCanvas.width = thumbW; thumbCanvas.height = thumbH;
             thumbCtx.drawImage(canvas, 0, 0, thumbW, thumbH);
             var thumbnail = thumbCanvas.toDataURL('image/jpeg', 0.6);
+            var captureW = canvas.width, captureH = canvas.height;
+            // Release capture canvas and thumbnail canvas memory
+            canvas.width = 0; canvas.height = 0; canvas = null;
+            thumbCanvas.width = 0; thumbCanvas.height = 0; thumbCanvas = null;
             var compressed = await compressImage(dataUrl, settings.compressMaxWidth, settings.imageQuality);
+            dataUrl = null; // Release raw data URL string
             project.pages.push({
                 id: uid(), title: document.title || location.hostname, url: location.href,
                 capturedAt: Date.now(), captureMode: captureMode,
                 imageData: compressed, thumbnail: thumbnail,
-                width: canvas.width, height: canvas.height
+                width: captureW, height: captureH
             });
             saveProjects(projects);
             var overlay = document.createElement('div');
@@ -862,9 +898,15 @@
             var tocEntries = [];
             var contentPageCount = 0;
 
-            // ---- Pass 1: Build content pages ----
+            // ---- Pass 1: Build content pages (streaming — one page at a time) ----
             for (var i = 0; i < project.pages.length; i++) {
-                var page = project.pages[i];
+                // Extract only what we need from the page, then release the reference
+                var pageRef = project.pages[i];
+                var pageTitle = pageRef.customTitle || pageRef.title;
+                var pageUrl = pageRef.url;
+                var pageCapturedAt = pageRef.capturedAt;
+                var pageImageData = pageRef.imageData;
+
                 progressFill.style.width = (((i) / project.pages.length) * 90) + '%';
                 progressText.textContent = 'Processing page ' + (i + 1) + ' of ' + project.pages.length + '...';
 
@@ -874,20 +916,19 @@
                 contentPageCount++;
 
                 // Record where this capture starts (use custom title if set)
-                var pageTitle = page.customTitle || page.title;
                 tocEntries.push({
                     title: pageTitle,
-                    url: page.url,
-                    capturedAt: page.capturedAt,
+                    url: pageUrl,
+                    capturedAt: pageCapturedAt,
                     pdfPage: contentPageCount,
                 });
 
-                // Load image
+                // Load image from the stored data
                 var img = await new Promise(function (resolve, reject) {
                     var im = new Image();
                     im.onload = function () { resolve(im); };
                     im.onerror = reject;
-                    im.src = page.imageData;
+                    im.src = pageImageData;
                 });
 
                 // Calculate how the image fits within content area
@@ -916,12 +957,12 @@
                     doc.setFontSize(7);
                     doc.setTextColor(120, 120, 140);
                     doc.setFont(undefined, 'normal');
-                    var headerUrlText = truncate(page.url, 95);
+                    var headerUrlText = truncate(pageUrl, 95);
                     doc.text(headerUrlText, marginMM, curY + 7.5);
                     // Clickable URL link on header
                     var headerUrlW = doc.getTextWidth(headerUrlText);
-                    doc.link(marginMM, curY + 4.5, headerUrlW, 4, { url: page.url });
-                    doc.text(fmtDate(page.capturedAt), pdfW - marginMM, curY + 7.5, { align: 'right' });
+                    doc.link(marginMM, curY + 4.5, headerUrlW, 4, { url: pageUrl });
+                    doc.text(fmtDate(pageCapturedAt), pdfW - marginMM, curY + 7.5, { align: 'right' });
 
                     // Underline
                     doc.setDrawColor(210, 210, 225);
@@ -934,8 +975,8 @@
                 var availableH = drawableH - (curY - marginMM);
 
                 if (drawH <= availableH) {
-                    // Fits on one page
-                    doc.addImage(page.imageData, 'JPEG', marginMM, imgStartY, drawW, drawH);
+                    // Fits on one page — use pageImageData directly, then release
+                    doc.addImage(pageImageData, 'JPEG', marginMM, imgStartY, drawW, drawH);
                 } else {
                     // Split image into segments
                     var pxPerMM = img.width / drawW;
@@ -955,6 +996,8 @@
                     segCtx.drawImage(img, 0, 0, img.width, firstSegSourceH, 0, 0, img.width, firstSegSourceH);
                     var segData = segCanvas.toDataURL('image/jpeg', settings.pdfImageQuality);
                     doc.addImage(segData, 'JPEG', marginMM, imgStartY, drawW, firstSegDrawH);
+                    segCanvas.width = 0; segCanvas.height = 0; segCtx = null; // Release segment canvas memory
+                    segData = null; // Release base64 string
 
                     var srcOffset = firstSegSourceH - overlapSrcPx;
 
@@ -975,12 +1018,24 @@
                         segCtx.drawImage(img, 0, srcOffset, img.width, actualH, 0, 0, img.width, actualH);
                         segData = segCanvas.toDataURL('image/jpeg', settings.pdfImageQuality);
                         doc.addImage(segData, 'JPEG', marginMM, marginMM, drawW, actualDrawH);
+                        segCanvas.width = 0; segCanvas.height = 0; segCtx = null; // Release segment canvas memory
+                        segData = null; // Release base64 string
 
                         srcOffset += actualH - overlapSrcPx;
+
+                        // Yield between segments for large images to let GC collect
+                        await new Promise(function (r) { setTimeout(r, 10); });
                     }
                 }
 
-                await new Promise(function (r) { setTimeout(r, 30); });
+                // Release all data for this page before moving to next (streaming)
+                img.src = '';
+                img = null;
+                pageImageData = null;
+                pageRef = null;
+
+                // Yield to event loop between pages — allows GC and keeps UI responsive
+                await new Promise(function (r) { setTimeout(r, 50); });
             }
 
             // ---- Pass 2: Add page numbers to all content pages ----
@@ -1115,6 +1170,88 @@
                         doc.text(project.name, marginMM, pdfH - marginMM + 4);
                         doc.text(new Date().toLocaleDateString(), pdfW - marginMM, pdfH - marginMM + 4, { align: 'right' });
                     }
+                }
+            }
+
+            // ---- Pass 4: Insert cover page at the very beginning ----
+            if (settings.includeCoverPage) {
+                doc.insertPage(1);
+
+                doc.setPage(1);
+                var coverCenterX = pdfW / 2;
+
+                // Top decorative line
+                doc.setDrawColor(180, 160, 220);
+                doc.setLineWidth(0.8);
+                doc.line(marginMM + 10, marginMM + 30, pdfW - marginMM - 10, marginMM + 30);
+
+                // Project name
+                doc.setFontSize(32);
+                doc.setTextColor(50, 50, 70);
+                doc.setFont(undefined, 'bold');
+                var coverTitle = project.name;
+                var titleLines = doc.splitTextToSize(coverTitle, contentW - 20);
+                doc.text(titleLines, coverCenterX, pdfH * 0.35, { align: 'center' });
+
+                // Subtitle — page count
+                doc.setFontSize(14);
+                doc.setTextColor(120, 120, 140);
+                doc.setFont(undefined, 'normal');
+                doc.text(project.pages.length + ' Captured Page' + (project.pages.length !== 1 ? 's' : ''), coverCenterX, pdfH * 0.35 + titleLines.length * 14 + 8, { align: 'center' });
+
+                // Author
+                if (settings.coverAuthor) {
+                    doc.setFontSize(16);
+                    doc.setTextColor(80, 80, 100);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(settings.coverAuthor, coverCenterX, pdfH * 0.55, { align: 'center' });
+                }
+
+                // Date
+                doc.setFontSize(12);
+                doc.setTextColor(140, 140, 155);
+                doc.setFont(undefined, 'normal');
+                doc.text(new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }), coverCenterX, pdfH * 0.62, { align: 'center' });
+
+                // Bottom decorative line
+                doc.setDrawColor(180, 160, 220);
+                doc.setLineWidth(0.8);
+                doc.line(marginMM + 10, pdfH - marginMM - 20, pdfW - marginMM - 10, pdfH - marginMM - 20);
+
+                // Footer credit
+                doc.setFontSize(8);
+                doc.setTextColor(170, 170, 185);
+                doc.text('Generated by Web PDF Compiler', coverCenterX, pdfH - marginMM - 10, { align: 'center' });
+
+                // Update all page numbers (shift everything by 1 for the cover page)
+                if (settings.includePageNumbers) {
+                    var finalTotal = doc.getNumberOfPages();
+                    for (var fp = 2; fp <= finalTotal; fp++) {
+                        doc.setPage(fp);
+                        doc.setFontSize(7);
+                        doc.setTextColor(160, 160, 170);
+                        doc.setFont(undefined, 'normal');
+                        doc.text('Page ' + fp + ' of ' + finalTotal, pdfW / 2, pdfH - marginMM + 4, { align: 'center' });
+                    }
+                }
+            }
+
+            // ---- Pass 5: Apply watermark to all pages ----
+            if (settings.watermarkText) {
+                var wmTotal = doc.getNumberOfPages();
+                var wmStartPage = settings.includeCoverPage ? 2 : 1; // skip cover page
+                for (var wp = wmStartPage; wp <= wmTotal; wp++) {
+                    doc.setPage(wp);
+                    doc.saveGraphicsState();
+                    doc.setGState(new doc.GState({ opacity: 0.08 }));
+                    doc.setFontSize(60);
+                    doc.setTextColor(120, 100, 160);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(settings.watermarkText, pdfW / 2, pdfH / 2, {
+                        align: 'center',
+                        angle: 45,
+                    });
+                    doc.restoreGraphicsState();
                 }
             }
 
